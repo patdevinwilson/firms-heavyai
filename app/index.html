@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Global thermal activity · FIRMS</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101820;color:#e6edf3}
+body{margin:0}header{padding:24px 30px;border-bottom:1px solid #34404d}h1{margin:0 0 8px;font-size:27px}
+p{color:#b5c2cf;line-height:1.5;margin:8px 0}main{padding:20px 30px}.controls{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:18px}
+label{display:flex;gap:8px;align-items:center}select,button{padding:9px 12px;border:1px solid #495869;border-radius:6px;background:#172635;color:#fff}
+button{cursor:pointer;background:#12695f}#map{height:58vh;min-height:360px;border-radius:10px;background:#182c39}
+#summary{font-size:19px;color:#78dcc6;margin:16px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:10px;border-bottom:1px solid #34404d}
+pre{white-space:pre-wrap;font-size:13px;color:#c0d4e6}details{margin:20px 0}a{color:#78dcc6}.leaflet-popup-content{color:#172635}
+</style>
+<header><h1>Global thermal activity</h1><p>NASA FIRMS · VIIRS observations · ongoing collection</p></header>
+<main><div class="controls">
+<label>Window <select id="hours"><option value="6">6 hours</option><option value="24" selected>24 hours</option><option value="72">3 days</option><option value="168">7 days</option></select></label>
+<label>Confidence <select id="confidence"><option value="nh">Nominal + high</option><option value="h">High</option><option value="all">All</option></select></label>
+<label>Satellite <select id="satellite"><option value="all">All</option><option value="N20">NOAA-20</option><option value="N21">NOAA-21</option><option value="N">Suomi-NPP</option></select></label>
+<button id="refresh">Refresh</button></div>
+<div id="map"></div><div id="summary" role="status">Loading observations…</div>
+<p>Each circle summarizes detections within a 1° cell. Cells have different physical areas at different latitudes. Counts describe satellite detections, not distinct fires or confirmed incidents. Missing detections do not establish inactivity.</p>
+<table><thead><tr><th>Product</th><th>Last successful collection (UTC)</th><th>Latest observation (UTC)</th></tr></thead><tbody id="freshness"></tbody></table>
+<details><summary>Query and evidence</summary><pre id="sql"></pre><p><a href="https://firms.modaps.eosdis.nasa.gov/" target="_blank" rel="noopener">NASA FIRMS</a> · Open HeavyIQ in the separate Immerse connection for natural-language analysis.</p></details>
+</main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map=L.map('map',{preferCanvas:true}).setView([15,0],2);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'© OpenStreetMap contributors © CARTO',maxZoom:18}).addTo(map);
+const layer=L.layerGroup().addTo(map);let running=false;
+async function refresh(){
+ if(running)return;running=true;document.getElementById('refresh').disabled=true;
+ try{
+  const params=new URLSearchParams();for(const key of ['hours','confidence','satellite'])params.set(key,document.getElementById(key).value);
+  const response=await fetch('/api/activity?'+params);const data=await response.json();if(!response.ok)throw new Error(data.error);
+  layer.clearLayers();let total=0;
+  for(const [lon,lat,count,latest] of data.cells){total+=count;const popup=document.createElement('div');popup.textContent=`${count.toLocaleString()} detections · latest ${latest} UTC`;
+   L.circleMarker([lat,lon],{radius:Math.min(18,3+Math.log2(count+1)),color:'#ffac58',weight:1,fillColor:'#ff794b',fillOpacity:0.6}).bindPopup(popup).addTo(layer);}
+  document.getElementById('summary').textContent=`${total.toLocaleString()} detections in ${data.cells.length.toLocaleString()} cells`;
+  const body=document.getElementById('freshness');body.replaceChildren();
+  for(const row of data.freshness){const tr=document.createElement('tr');for(const value of row){const td=document.createElement('td');td.textContent=value??'No detections';tr.append(td);}body.append(tr);}
+  document.getElementById('sql').textContent=data.sql;
+ }catch(error){document.getElementById('summary').textContent=error.message;}
+ finally{running=false;document.getElementById('refresh').disabled=false;}
+}
+document.getElementById('refresh').onclick=refresh;refresh();setInterval(refresh,60000);
+</script>
+</html>

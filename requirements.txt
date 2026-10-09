@@ -1,0 +1,3 @@
+boto3==1.40.40
+heavyai==1.3
+requests==2.32.5

@@ -1,0 +1,14 @@
+{
+  "region": "us-east-1",
+  "stack_name": "firms-heavyai",
+  "instance_type": "g5.4xlarge",
+  "disk_gb": 300,
+  "heavyai_image": "",
+  "heavyai_image_archive": "",
+  "heavyai_image_sha256": "",
+  "sources": ["VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT", "VIIRS_SNPP_NRT"],
+  "lookback_days": 3,
+  "retain_days": 90,
+  "fable_model": "",
+  "heavyiq_required": true
+}

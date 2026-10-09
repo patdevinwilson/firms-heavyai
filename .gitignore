@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+.deploy/
+config.json
+*.license
+secrets*.json
+heavyiq.local.conf
+.DS_Store

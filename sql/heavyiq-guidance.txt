@@ -1,0 +1,9 @@
+firms_observations contains satellite thermal detections, not distinct fires, incident perimeters, burned area, or proof of human activity. Do not infer cause or intent from a hotspot alone.
+All acquired_at, ingested_at and collection timestamps are UTC. acquired_at is the satellite observation time, not the collection time. Default unspecified recent queries to the last 24 hours and state that assumption.
+VIIRS confidence is categorical: l=low, n=nominal, h=high. High confidence means confidence='h'; nominal and high means confidence IN ('n','h'). It is not a numeric probability.
+frp is fire radiative power in megawatts for a detection. Summing FRP across repeat overpasses does not measure energy, burned area, or number of fires.
+location is a WGS84 POINT geometry. Coordinates are longitude then latitude. Geometry distances in EPSG:4326 are angular units. Use supported geography point distance operations for metres; verify polygon/line proximity support before writing SQL.
+source and satellite identify observation products. Keep satellite identity in comparisons. Multiple satellites and neighbouring pixels can observe the same physical event.
+Missing detections do not establish inactivity: cloud, orbit, sensor availability and observation conditions affect coverage. Detection-count changes are descriptive and not a coverage-normalized anomaly score.
+Collection freshness comes from successful firms_collection_runs.completed_at. Observation freshness comes from latest_observation_at; an empty successful response is valid.
+Use only tables present in the database. Infrastructure proximity is unavailable until an infrastructure dataset is loaded. Never invent assets, country boundaries, cluster IDs, incident IDs or historical coverage.
