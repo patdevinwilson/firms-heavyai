@@ -33,6 +33,8 @@ The deployment follows [NVIDIA's source-build workflow](https://docs.nvidia.com/
 
 HeavyDB/HeavyIQ commits are in `config.example.json`; Immerse/webserver commits are in `scripts/build_source.py`. A manifest records refs and the resulting image ID at `/opt/heavyai-source/manifest.json`. Model and llama.cpp revisions are pinned too. Upstream dependencies/base images retain upstream resolution behavior: this is not a fully hermetic build.
 
+The pinned HeavyIQ revision references an unavailable Chroma development package. The build explicitly replaces `chromadb==1.5.10.dev239` with published `1.5.9`, removes the TestPyPI extra index, and builds the declared `pyheavydb==10.0.0` connector from a pinned public source revision using upstream's local-wheel hook. These changes are recorded in the manifest. Native IQ generation is evaluated after startup; RAG remains disabled, and Chroma/RAG behavior is not certified by this demo.
+
 At the inspected revision, `build deps` builds dependencies from scratch rather than merely pulling an image. Allow **several hours** for the first deployment. Remote bootstrap allows eight hours and logs to `/var/log/firms-runtime-install.log`. Subsequent runs reuse matching artifacts. Eight build jobs limit memory pressure. Default encrypted gp3 storage is **500 GB** for build containers, sources and data.
 
 Native IQ configuration is generated from the pinned schema; users need no external model endpoint or manual IQ stanza. `--without-heavyiq` gives a collection-only deployment. Optional `--license` supports releases requiring one. Software/model license terms remain their owners' terms.
