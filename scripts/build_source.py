@@ -34,8 +34,10 @@ def main():
     tag = "firms-" + refs["heavydb"][:12]
     deps = "ghcr.io/heavyai/heavydb/core-build-ubuntu22.04-static-cuda12.9.2-x86_64:" + tag
     if subprocess.run(["docker", "image", "inspect", deps], capture_output=True).returncode:
+        print("[firms-progress] heavyai_dependencies", flush=True)
         run("bash", "dev-tools/dev.sh", "build", "deps", "--distro=ubuntu22.04",
             "--cuda-version=12.9.2", "--tag=" + tag, "--nproc=8", cwd=source)
+    print("[firms-progress] heavyai_components", flush=True)
     run("bash", "dev-tools/dev.sh", "build", "all", "--docker", "--distro=ubuntu22.04",
         "--deps-image=" + deps, "--nproc=8", "--heavyiq-ref=" + refs["heavyiq"],
         "--immerse-ref=" + refs["immerse"], "--webserver-ref=" + refs["webserver"], cwd=source)

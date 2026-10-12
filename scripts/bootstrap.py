@@ -47,6 +47,7 @@ def main():
     else:
         # Authenticated registries require a preconfigured credential helper/login.
         docker("pull", image)
+    print("[firms-progress] engine_initialize", flush=True)
     if not (storage / "storage" / "catalogs").exists():
         docker("run", "--rm", "--gpus", "all", "--entrypoint", "/opt/heavyai/bin/initheavy",
                "-v", f"{storage}:{storage}", image, str(storage / "storage"))

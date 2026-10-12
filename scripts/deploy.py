@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """AWS CLI + Python standard library deployment; no local SDK or Terraform needed."""
 import argparse
+import base64
 import getpass
 import hashlib
 import json
@@ -137,6 +138,10 @@ def send(args, config, instance, command):
 
 
 def wait_command(args, config, instance, command_id):
+    previous_state = None
+    last_report = 0
+    probe_id = None
+    started = time.monotonic()
     for _ in range(2940):
         try:
             result = aws(["ssm", "get-command-invocation", "--command-id", command_id,
@@ -147,11 +152,43 @@ def wait_command(args, config, instance, command_id):
         state = result["Status"]
         if state == "Success":
             print(result.get("StandardOutputContent", ""))
+            if probe_id:
+                print("Bootstrap complete. Use status for collection health and SQL evaluation results.", flush=True)
             return
         if state in {"Failed", "TimedOut", "Cancelled", "Cancelling"}:
             raise RuntimeError("Remote bootstrap failed. Inspect SSM command " + command_id
                                + " and /var/log/firms-runtime-install.log on the instance.")
-        print("Bootstrap: " + state, flush=True)
+        if state != previous_state:
+            print("Bootstrap: " + state, flush=True)
+            previous_state = state
+        minutes = int((time.monotonic() - started) / 60)
+        if probe_id:
+            try:
+                probe = aws(["ssm", "get-command-invocation", "--command-id", probe_id,
+                             "--instance-id", instance], args.profile, config["region"])
+                if probe["Status"] == "Success":
+                    progress = json.loads(probe["StandardOutputContent"])
+                    percent = progress.get("component_percent")
+                    detail = f"; component {percent}%" if percent is not None else ""
+                    print(f"Build: {progress['stage']}{detail}; last output "
+                          f"{progress['last_output_seconds_ago']}s ago; "
+                          f"disk free {progress['disk_free_gb']} GB; monitoring {minutes}m", flush=True)
+                elif probe["Status"] not in {"Pending", "InProgress", "Delayed"}:
+                    print(f"Bootstrap: {state}; monitoring {minutes}m; telemetry {probe['Status']}", flush=True)
+                if probe["Status"] not in {"Pending", "InProgress", "Delayed"}:
+                    probe_id = None
+            except (subprocess.CalledProcessError, ValueError, KeyError):
+                print(f"Bootstrap: {state}; monitoring {minutes}m; telemetry unavailable", flush=True)
+                probe_id = None
+        if time.monotonic() - last_report >= 60 and not probe_id:
+            encoded = base64.b64encode((ROOT / "scripts/build_progress.py").read_bytes()).decode()
+            command = "python3 -c " + shlex.quote("import base64; exec(base64.b64decode(" + repr(encoded) + "))")
+            try:
+                probe_id = send(args, config, instance, command)
+            except subprocess.CalledProcessError:
+                probe_id = None
+                print(f"Bootstrap: {state}; monitoring {minutes}m; telemetry unavailable", flush=True)
+            last_report = time.monotonic()
         time.sleep(10)
     raise TimeoutError("Bootstrap still running; inspect SSM command " + command_id)
 
@@ -250,6 +287,8 @@ def main():
     launch = commands.add_parser("deploy")
     launch.add_argument("--plan", action="store_true")
     commands.add_parser("status")
+    monitor = commands.add_parser("monitor")
+    monitor.add_argument("--command-id", required=True)
     connect = commands.add_parser("connect")
     connect.add_argument("--port", type=int, choices=[8080, 6273], default=8080)
     commands.add_parser("destroy")
@@ -275,6 +314,12 @@ def main():
                           "set -a; . /etc/firms-heavyai.env; set +a; "
                           "/opt/firms-heavyai/.venv/bin/python /opt/firms-heavyai/scripts/health.py")
         wait_command(args, config, out["InstanceId"], command_id)
+    elif args.command == "monitor":
+        if not re.fullmatch(r"[0-9a-f-]{36}", args.command_id):
+            raise ValueError("Invalid SSM command ID")
+        out = outputs(args, config)
+        print("Monitoring existing SSM command: " + args.command_id, flush=True)
+        wait_command(args, config, out["InstanceId"], args.command_id)
     elif args.command == "destroy":
         aws(["cloudformation", "delete-stack", "--stack-name", config["stack_name"]],
             args.profile, config["region"])

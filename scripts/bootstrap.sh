@@ -7,6 +7,7 @@ printf 'AWS_REGION=%s\nSECRET_ARN=%s\nARCHIVE_BUCKET=%s\n' "$AWS_REGION" "$SECRE
 python3 -m venv .venv
 .venv/bin/pip install --disable-pip-version-check -r requirements.txt
 if .venv/bin/python -c 'import json; c=json.load(open("config.json")); raise SystemExit(0 if c.get("build_from_source") and c.get("heavyiq_required") else 1)'; then
+  echo '[firms-progress] model_install'
   bash scripts/install_model.sh
 fi
 .venv/bin/python scripts/bootstrap.py
@@ -68,6 +69,7 @@ Persistent=true
 WantedBy=timers.target
 UNIT
 systemctl daemon-reload
+echo '[firms-progress] collection'
 systemctl start firms-collect.service
 systemctl enable --now firms-collect.timer firms-demo.service
 if .venv/bin/python -c 'import json; c=json.load(open("config.json")); raise SystemExit(0 if c.get("fable_model") else 1)'; then
@@ -79,7 +81,9 @@ if .venv/bin/python -c 'import json; c=json.load(open("config.json")); raise Sys
     if curl --fail --silent http://127.0.0.1:6275/openapi.json >/dev/null; then break; fi
     sleep 5
   done
+  echo '[firms-progress] iq_evaluation'
   .venv/bin/python scripts/evaluate_iq.py
 fi
 .venv/bin/python scripts/health.py
 echo 'Runtime installed; collection and dashboard are ready. See evaluation report for model scope.'
+echo '[firms-progress] ready'
