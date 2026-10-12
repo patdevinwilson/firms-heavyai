@@ -1,0 +1,17 @@
+Question: Count high-confidence detections. Return one total count.
+SQL: SELECT COUNT(*) AS detections FROM firms_observations WHERE confidence = 'h';
+
+Question: Count nominal- and high-confidence detections in the last 24 hours.
+SQL: SELECT COUNT(*) AS detections FROM firms_observations WHERE confidence IN ('n','h') AND acquired_at >= DATEADD('hour', -24, CURRENT_TIMESTAMP);
+
+Question: Count detections per satellite.
+SQL: SELECT satellite, COUNT(*) AS detections FROM firms_observations GROUP BY satellite;
+
+Question: List the UTC day and detection count per day.
+SQL: SELECT DATE_TRUNC('day', acquired_at) AS day_utc, COUNT(*) AS detections FROM firms_observations GROUP BY day_utc;
+
+Question: Sum FRP for high-confidence NOAA-20 detections.
+SQL: SELECT SUM(frp) AS total_frp_mw FROM firms_observations WHERE confidence='h' AND satellite='N20';
+
+Question: Show the latest successful collection for each product.
+SQL: SELECT source, MAX(completed_at) AS last_success FROM firms_collection_runs WHERE status='success' GROUP BY source;

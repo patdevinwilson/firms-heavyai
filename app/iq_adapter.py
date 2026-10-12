@@ -33,9 +33,11 @@ def messages(prompt):
               "Use DATEADD('hour', -24, CURRENT_TIMESTAMP) for recent windows; "
               "DATE_TRUNC('day', acquired_at) for UTC days. No PostgreSQL INTERVAL, "
               "PostGIS constructors, or invented columns. Respect the provided schema.\n"
+              "Answer the exact question. Never add a grouping or satellite breakdown unless requested. "
+              "A request for a count without a breakdown needs one total count column and no GROUP BY.\n"
               "Examples below illustrate syntax only; never use an example table absent from the task schema.\n"
               + (ROOT / "sql/heavyiq-guidance.txt").read_text()
-              + "\nExamples:\n" + (ROOT / "sql/demo.sql").read_text())
+              + "\nExamples:\n" + (ROOT / "sql/heavysql-examples.txt").read_text())
     return task, [{"role": "system", "content": system}, {"role": "user", "content": body}]
 
 
