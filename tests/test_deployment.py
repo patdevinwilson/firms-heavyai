@@ -17,6 +17,15 @@ class DeploymentTests(unittest.TestCase):
     def test_valid_portable_config(self):
         validate_config(self.config())
 
+    def test_source_build_defaults_need_no_image_credentials(self):
+        config = json.loads((ROOT / "config.example.json").read_text())
+        validate_config(config)
+        self.assertTrue(config["build_from_source"])
+        for field in ("heavydb_ref", "heavyiq_ref"):
+            invalid = dict(config, **{field: "main"})
+            with self.assertRaises(ValueError):
+                validate_config(invalid)
+
     def test_unpinned_and_shell_images_rejected(self):
         for image in ("example:latest", "example;touch /tmp/pwn", ""):
             config = self.config()

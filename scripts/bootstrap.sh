@@ -6,6 +6,9 @@ cd /opt/firms-heavyai
 printf 'AWS_REGION=%s\nSECRET_ARN=%s\nARCHIVE_BUCKET=%s\n' "$AWS_REGION" "$SECRET_ARN" "$ARCHIVE_BUCKET" > /etc/firms-heavyai.env
 python3 -m venv .venv
 .venv/bin/pip install --disable-pip-version-check -r requirements.txt
+if .venv/bin/python -c 'import json; c=json.load(open("config.json")); raise SystemExit(0 if c.get("build_from_source") and c.get("heavyiq_required") else 1)'; then
+  bash scripts/install_model.sh
+fi
 .venv/bin/python scripts/bootstrap.py
 cat > /etc/systemd/system/firms-collect.service <<'UNIT'
 [Unit]
@@ -70,5 +73,13 @@ systemctl enable --now firms-collect.timer firms-demo.service
 if .venv/bin/python -c 'import json; c=json.load(open("config.json")); raise SystemExit(0 if c.get("fable_model") else 1)'; then
   systemctl enable --now firms-brief.timer
 fi
+if .venv/bin/python -c 'import json; c=json.load(open("config.json")); raise SystemExit(0 if c.get("build_from_source") and c.get("heavyiq_required") else 1)'; then
+  # Native IQ may install its own Python environment after HeavyDB is available.
+  for attempt in {1..120}; do
+    if curl --fail --silent http://127.0.0.1:6275/openapi.json >/dev/null; then break; fi
+    sleep 5
+  done
+  .venv/bin/python scripts/evaluate_iq.py
+fi
 .venv/bin/python scripts/health.py
-echo 'Runtime installed; collection and dashboard are ready.'
+echo 'Runtime installed; collection and dashboard are ready. See evaluation report for model scope.'

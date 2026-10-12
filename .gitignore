@@ -9,4 +9,5 @@ config.json
 *.license
 secrets*.json
 heavyiq.local.conf
+.iq-evaluation.json
 .DS_Store

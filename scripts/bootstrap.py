@@ -23,7 +23,9 @@ def main():
     (storage / "import").mkdir(parents=True, exist_ok=True)
     image = config["heavyai_image"]
     archive = config.get("heavyai_image_archive")
-    if archive:
+    if config.get("build_from_source"):
+        subprocess.run([sys.executable, str(ROOT / "scripts/build_source.py")], check=True)
+    elif archive:
         target = Path("/opt/firms-image.tar")
         if archive.startswith("s3://"):
             # S3 URI must be accessible to instance role. Prefer upload into this
@@ -53,6 +55,12 @@ def main():
         license_file.write_text(secret["heavyai_license"])
         license_file.chmod(0o600)
     iq_config = secret.get("heavyiq_config", "")
+    if config.get("build_from_source"):
+        iq_config = ('[iq]\ndisabled = false\ncustom_llm_type = "API_VLLM"\n'
+                     'custom_llm_api_base = "http://host.docker.internal:8100/v1"\n'
+                     'custom_llm_api_context_window = 6000\n'
+                     'custom_llm_api_vllm_beam_width = 1\n'
+                     'enable_logprobs = false\nenable_rag = false\n')
     if config["heavyiq_required"]:
         parser = configparser.ConfigParser(interpolation=None, strict=False)
         parser.read_string(iq_config)
@@ -75,9 +83,10 @@ def main():
     if existing.strip():
         docker("rm", "-f", "heavyai")
     docker("run", "-d", "--name", "heavyai", "--restart", "unless-stopped", "--gpus", "all",
+           "--add-host", "host.docker.internal:host-gateway",
            "--ipc=host", "-v", f"{storage}:{storage}",
            "-p", "127.0.0.1:6273:6273", "-p", "127.0.0.1:6274:6274",
-           "-p", "127.0.0.1:6278:6278", image)
+           "-p", "127.0.0.1:6278:6278", "-p", "127.0.0.1:6275:6275", image)
     db = None
     for _ in range(90):
         for password in (secret["heavyai_password"], "HyperInteractive"):

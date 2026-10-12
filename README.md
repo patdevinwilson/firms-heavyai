@@ -1,130 +1,111 @@
-# Global FIRMS activity with HEAVY.AI on AWS
+# Global FIRMS activity with HEAVY.AI and Nemotron on AWS
 
-Deploy a global NASA FIRMS collector and a ready-made map demo on **one `g5.4xlarge`**. Use native HeavyIQ in Immerse with a separately hosted HeavyLM endpoint. Optionally generate daily evidence-linked briefings through the Fable API.
+Deploy global NASA FIRMS collection, a map with instrument imagery popups, source-built HEAVY.AI and local Nemotron inference on one **g5.4xlarge**, using AWS profile **heavyai**. Optional Fable briefings summarize query evidence daily.
 
-**Validation status:** local unit tests and AWS CloudFormation template validation pass. A complete AWS runtime deployment, HEAVY.AI image compatibility, native HeavyIQ generation, and live FIRMS collection have **not yet been verified**. The deployment deliberately requires a release image and its supported HeavyIQ configuration instead of inventing vendor flags or shipping a broken image reference.
-
-## What users provide once
-
-- AWS CLI v2, Python 3.10 or newer, and an AWS profile with deployment permissions.
-- The [AWS Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) for local access.
-- A free [NASA FIRMS MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/).
-- An accessible, versioned HEAVY.AI GPU image containing HeavyDB, Immerse and native HeavyIQ; a license if required by that release. Image binaries and licenses are not redistributed in this repository.
-- The release-supported `[iq]` configuration for your external model endpoint, including `disabled = false`. Obtain the exact fields from the supplied release. The public configuration documentation does not provide a complete portable endpoint example.
-- Optional: an Anthropic API key and the exact supported Fable model ID for scheduled briefings.
-
-A g5.4xlarge has one A10G with 24 GB nominal GPU memory. The documented quantized HeavyLM needs at least 48 GB, so **this instance runs HEAVY.AI; HeavyLM inference runs elsewhere**. External model availability and costs are separate. This repository does not provision that second service or silently replace HeavyLM with a smaller model.
+**Validation status:** local tests pass. Source/model revisions are pinned; NASA layer names and the model checksum were verified against public metadata. Full AWS source-build execution, live FIRMS ingestion and model HeavySQL accuracy have not yet been verified. Bootstrap runs a native HeavyIQ execution benchmark before reporting success.
 
 ## Quick start
 
-Clone this repository and configure your AWS profile. The default profile is `heavyai`; substitute your own using `--profile` before the subcommand.
+Users need Python 3.10+, AWS CLI v2, the AWS Session Manager plugin, an AWS profile with CloudFormation/EC2/IAM/S3/Secrets Manager/SSM deployment permissions, GPU quota/capacity, and a free [FIRMS MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/). No local GPU or Docker installation is required.
 
 ```bash
-python3 scripts/deploy.py --profile heavyai configure \
-  --image YOUR_REGISTRY/YOUR_HEAVYAI_IMAGE:PINNED_VERSION \
-  --iq-config /path/to/release-supported-iq.conf \
-  --license /path/to/heavyai.license
-
+git clone YOUR_PUBLISHED_REPOSITORY_URL
+cd firms-heavyai
+python3 scripts/deploy.py --profile heavyai configure
 python3 scripts/deploy.py --profile heavyai deploy --plan
 python3 scripts/deploy.py --profile heavyai deploy
 python3 scripts/deploy.py --profile heavyai connect
 ```
 
-`configure` prompts for the FIRMS key without echoing it, generates database passwords, and stores credentials in an ignored local file with mode 0600. `--license` is optional for releases that do not require one. `FIRMS_MAP_KEY` can also be supplied through the environment. Do not put keys in command arguments or commit configuration files.
+The repo has not yet been published to a GitHub remote; replace the clone placeholder after publishing. Configure prompts for the FIRMS key without echoing it, generates database passwords, and stores credentials in ignored `.deploy/secrets.json` with mode 0600. `FIRMS_MAP_KEY` can also be supplied through the environment.
 
-Open **http://localhost:8080** while the SSM session is running. The map already has time-window, satellite and confidence filters, collection timestamps, and the underlying SQL. Its 1° bins are a display aggregation, not physical activity clusters; their geographic areas vary with latitude. Browser map assets and basemap tiles come from Leaflet/unpkg and CARTO, so browser internet access is required.
-
-For native HeavyIQ/Immerse:
+Open http://localhost:8080 during the SSM session. Filter global detections by time, satellite and confidence. Select a cell, page through its records and open their imagery popups. Display cells are 1° aggregations, not activity clusters; their physical areas vary with latitude.
 
 ```bash
 python3 scripts/deploy.py --profile heavyai connect --port 6273
 ```
 
-Open http://localhost:6273 and log in as `firms_reader` using the generated `reader_password` from `.deploy/secrets.json`. Administrators use the generated `heavyai_password`; the bootstrap rotates the default password before enabling collection. Import the domain guidance from `sql/heavyiq-guidance.txt` into the native Guidance panel using the administrator account. Automatic guidance import is release-specific and is not implemented here.
+Open http://localhost:6273 for Immerse/native HeavyIQ. Log in as `firms_reader` with `reader_password` from `.deploy/secrets.json`. Administrative login uses `admin` and `heavyai_password`. The default admin password is rotated automatically. Native IQ uses the user's HeavyDB session permissions.
 
-For an explicitly collection-only deployment, replace `--iq-config` with `--without-heavyiq`. The map still works; native conversational analytics is disabled and deployment status reports that fact.
+## Source build
 
-## Image archives
+The deployment follows [NVIDIA's source-build workflow](https://docs.nvidia.com/heavyai/installation-and-configuration/installation/build-from-source), Ubuntu 22.04 and CUDA 12.9.2. It builds the dependencies container, then runs **`dev-tools/dev.sh build all --docker`**. The `all` target includes HeavyIQ; upstream's default build omits it.
 
-You may supply a Docker-save archive instead of pulling a registry image:
+HeavyDB/HeavyIQ commits are in `config.example.json`; Immerse/webserver commits are in `scripts/build_source.py`. A manifest records refs and the resulting image ID at `/opt/heavyai-source/manifest.json`. Model and llama.cpp revisions are pinned too. Upstream dependencies/base images retain upstream resolution behavior: this is not a fully hermetic build.
+
+At the inspected revision, `build deps` builds dependencies from scratch rather than merely pulling an image. Allow **several hours** for the first deployment. Remote bootstrap allows eight hours and logs to `/var/log/firms-runtime-install.log`. Subsequent runs reuse matching artifacts. Eight build jobs limit memory pressure. Default encrypted gp3 storage is **500 GB** for build containers, sources and data.
+
+Native IQ configuration is generated from the pinned schema; users need no external model endpoint or manual IQ stanza. `--without-heavyiq` gives a collection-only deployment. Optional `--license` supports releases requiring one. Software/model license terms remain their owners' terms.
+
+Advanced users can opt out of source builds with `configure --image VERSIONED_IMAGE --iq-config RELEASE_SUPPORTED_CONFIG`. Optional `--archive https://... --sha256 ...` loads a verified Docker-save archive. Private registry authentication and cross-account archive access require separate configuration.
+
+## Selected model and HeavySQL comprehension
+
+The initial candidate is NVIDIA's official [Nemotron 3 Nano 4B GGUF](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF), **Q4_K_M**, with a 2.84 GB weight file. Source-built llama.cpp runs it on **CPU**, eight threads, zero GPU layers and an 8192-token context. HeavyDB retains the A10G GPU. Model latency and concurrent-user capacity have not been measured.
+
+This is an instruction model adapted for HeavySQL, not a model demonstrated to have been trained specifically on HeavySQL. `app/iq_adapter.py` converts native IQ task-marked text completions into chat messages, adding HeavySQL dialect guidance, FIRMS semantics and SQL examples. HeavyIQ supplies live table schemas and sampled values. The advertised 6000-token budget reserves room for added guidance and responses.
+
+Supported tasks: SQL generation/repair, result explanation, table selection, suggested questions and instructions, up to five candidates. Streaming is buffered, then emitted as SSE. Beam search, token-logprob scoring, chain-of-thought and SQL-judge endpoints are unsupported. Generated native configuration disables beam search, logprobs and RAG. Domain guidance is added automatically; no manual Guidance-panel import is required. Retrieval of a larger HeavySQL documentation corpus is not implemented.
+
+Bootstrap runs `scripts/evaluate_iq.py` against native `/api/v1/lcel/query`. A nonempty temporary fixture checks categorical confidence, satellite grouping, UTC daily grouping, FRP and timestamp boundaries. Generated SQL executes as `firms_reader` and is compared with gold execution results. Admin creates/removes the fixture. `.iq-evaluation.json` on the instance records results. A failure stops bootstrap with an error; already started map/collection services remain available for diagnosis.
+
+Rerun from an SSM shell after prompt/model changes:
 
 ```bash
-python3 scripts/deploy.py configure \
-  --image IMAGE_NAME_AND_TAG_CONTAINED_IN_ARCHIVE \
-  --archive https://YOUR_ACCESSIBLE_HOST/release-render-docker.tar.gz \
-  --sha256 ARCHIVE_SHA256 \
-  --iq-config /path/to/release-supported-iq.conf
+set -a
+. /etc/firms-heavyai.env
+set +a
+cd /opt/firms-heavyai
+.venv/bin/python scripts/evaluate_iq.py
 ```
 
-HTTPS archives must be downloadable by the instance. An S3 URI also works when the instance role has access; by default that role can read only this deployment's own archive bucket. Cross-account/private buckets need an explicit policy grant. Private registries need a credential helper/login on the instance; automated private-registry authentication is not implemented. Prefer an accessible HTTPS release archive for a self-service demo. The archive checksum is verified before `docker load`.
+Passing six smoke cases does not establish broad HeavySQL accuracy. Extend evaluation with real investigations, geometry/geography units, joins, missing data, hallucinations and query limits. Fine-tune only after measuring failures; preserve held-out cases.
 
-The historical `heavyai/heavyai-ee-cuda:v9.0.2` Docker Hub reference could not be resolved when this project was prepared. There is deliberately no unverified default image.
+## Imagery for each record
 
-## Deployment behavior
+Every record receives an image descriptor from its satellite, UTC acquisition date, coordinates and day/night flag. Popups fetch NASA GIBS imagery and mark the detection coordinate.
 
-The CLI creates a fresh VPC, subnet, internet route, an EC2 instance, a private encrypted/versioned S3 bucket and a Secrets Manager secret. No existing VPC, key pair, internal image bucket or IAM role is required. The generated instance role can access only its own bucket and secret, plus the AWS-managed SSM permissions.
+| Satellite | Day GIBS layer | Night GIBS layer | L1B product |
+| --- | --- | --- | --- |
+| Suomi-NPP | VIIRS_SNPP_CorrectedReflectance_TrueColor | VIIRS_SNPP_Brightness_Temp_BandI5_Night | VNP02IMG |
+| NOAA-20 | VIIRS_NOAA20_CorrectedReflectance_TrueColor | VIIRS_NOAA20_Brightness_Temp_BandI5_Night | VJ102IMG |
+| NOAA-21 | VIIRS_NOAA21_CorrectedReflectance_TrueColor | VIIRS_NOAA21_Brightness_Temp_BandI5_Night | VJ202IMG |
 
-There are **no inbound security-group ports** and no SSH key. The instance has outbound internet access and a public address for downloads and SSM. Database and demo ports bind to loopback. Access uses SSM port forwarding; users need AWS `ssm:StartSession` permission. This is an operator-access demo, not a public multi-tenant web service. A public/shared service would additionally need a TLS endpoint, user authentication and a deliberate access model.
+**GIBS daily mosaics do not guarantee the exact detection overpass.** Every popup says so. Night imagery is brightness temperature, not true colour. No different satellite is substituted if imagery is unavailable. Transparent pixels can mean cloud, missing swaths or publication delays; receiving a PNG does not establish coverage of the observation.
 
-Bootstrap installs NVIDIA drivers, Docker, the NVIDIA Container Toolkit and Python dependencies, reboots, then initializes HEAVY.AI, the database schema, and scheduled collection. Startup can take 10–20 minutes or longer with large release downloads. The CLI waits for GPU readiness and reports SSM bootstrap progress. AWS quota/capacity or missing deployment permissions can prevent launch.
+Images are fetched **when a popup opens**, shared by satellite/date/quarter-degree tile and cached for one hour within a 2 GB local cache. Every record has image access; the collector does not eagerly download one file per global row. GIBS mosaics can be revised. Raw FIRMS snapshots remain archived evidence.
 
-The `heavyai` profile defaults to `us-east-1`. Edit the ignored `config.json` after configuring to change the region, disk size or retention. Instance type is intentionally restricted to g5.4xlarge. The default encrypted gp3 root disk is 300 GB; local observations are retained for 90 days, and raw S3 responses for 365 days. Initial collection retrieves only the configured three-day window; longer baselines accumulate over time. Historical backfill is not currently automated.
+Each popup also offers **Find matching instrument granule**. NASA CMR is queried using the satellite-specific L1B product, point and observation minute; candidates are filtered for temporal overlap. Available browse/data links and acquisition times are displayed. Matches are candidates; exact image-pixel association is not asserted. Full L1B files may need Earthdata login, geolocation products and swath processing. Authenticated downloads and raster crops are not implemented. See [NASA GIBS](https://nasa-gibs.github.io/gibs-api-docs/access-basics/) and the [VIIRS L1B catalog](https://ladsweb.modaps.eosdis.nasa.gov/missions-and-measurements/science-domain/viirs-L0-L1).
 
-## Collection and publication
+## Collection and Fable
 
-- Hourly collection retrieves `world` for NOAA-20, NOAA-21 and Suomi-NPP, using a fixed UTC start date and a rolling three-calendar-day window.
-- Each response is validated before it is archived. Error pages do not count as empty successful collections. Empty CSVs with valid headers do.
-- Acquisition time and ingestion time remain separate. IDs include product, satellite, timestamp and coordinates. Revised processing versions retain the observation ID; duplicate rows in one response are collapsed.
-- A new batch is loaded and its row count checked before one publication statement selects it for the affected source/days. Failed loads leave the previous batch selected. This avoids assuming that HeavyDB supports a multi-statement transaction.
-- Old batches are removed after publication. Raw snapshots preserve provenance, including preliminary detections that a later response replaces.
-- A process lock prevents overlapping collectors. Retries use backoff, and logs do not include MAP_KEY-bearing URLs.
+Hourly collection fetches `world` from VIIRS_NOAA20_NRT, VIIRS_NOAA21_NRT and VIIRS_SNPP_NRT, using a fixed UTC start date and rolling three-calendar-day window. Acquisition/ingestion times are separate. Stable IDs include satellite, product, time and coordinates; revisions retain the ID. Invalid responses do not count as empty successful collections.
 
-The display queries `firms_observations`, a view that selects the latest published source/day batch. `firms_collection_runs` supplies collection status and freshness. The batch tables are internal to ingestion.
+Raw CSV is archived in S3. New batches are loaded and counted before one statement publishes the affected source/days. Failed loads leave previous data visible. `firms_observations` exposes published data; `firms_collection_runs` reports freshness. A lock prevents overlapping collectors. Local retention is 90 days; raw S3 retention is 365 days. Initial history is three days; baselines accumulate. Historical backfill/archive replay are not automated.
 
-FIRMS global coverage is not continuous observation of every location. Cloud, overpass timing, sensor availability and processing latency affect detections. The demo does not estimate coverage-normalized anomalies, infer fire cause or intent, or equate detections with distinct fires. Infrastructure proximity requires loading an additional infrastructure dataset.
+Detections are thermal pixels, not distinct fires, causes, intent or verified incidents. Missing detections do not prove inactivity. Global product coverage depends on orbits, cloud and processing delays. Infrastructure proximity needs another dataset; coverage-normalized anomaly detection is not implemented.
 
-## HeavyIQ verification
+For Fable, set `ANTHROPIC_API_KEY`, rerun `configure --fable-model YOUR_SUPPORTED_FABLE_MODEL_ID`, then redeploy. The project assumes Fable means the Anthropic model/API; supply its exact supported model ID. At 09:15 UTC daily, Fable summarizes three predefined read-only query results and cites their IDs. Briefings, SQL and results go to S3 `briefings/`. Query summaries are sent to Anthropic. Collection runs independently; Fable has no arbitrary SQL/cloud mutation tools.
 
-Start with HeavyLM and the provided guidance. Native HeavyIQ configuration depends on the exact installed release. `status` reports whether native IQ was configured, **not whether generated SQL is correct**. Verify at least these questions in native SQL Notebook and compare the results with the SQL in `sql/demo.sql`:
-
-1. Show nominal- and high-confidence detections in the last 24 hours.
-2. Count detections per satellite and confidence category.
-3. Show UTC daily counts for the last 30 days; distinguish a short collection history from zero activity.
-4. Show the most recent successful collection and observation for each product.
-5. Explain what the dataset cannot tell us about distinct incidents and cause.
-
-Review generated SQL for time windows, confidence semantics and coordinate units. A versioned benchmark against representative schemas and expected results is needed before claiming HeavySQL model accuracy. Custom fine-tuning and a native HeavyIQ evaluation API adapter are not included.
-
-## Optional Fable briefing
-
-Set `ANTHROPIC_API_KEY` in your environment and re-run `configure --fable-model YOUR_SUPPORTED_FABLE_MODEL_ID` with the same image/IQ settings. Redeploy to update the secret and start the daily timer.
-
-At 09:15 UTC daily, Fable receives results of three predefined, read-only HeavyDB queries and produces a briefing citing query IDs. The briefing, SQL and result evidence are saved under `briefings/` in S3. This sends query summaries to Anthropic. The model has no arbitrary SQL execution or cloud mutation tools; the hourly collection scheduler works independently of Fable. Expanded agent-driven investigations are a future extension.
-
-## Operations and cleanup
+## Operations
 
 ```bash
 python3 scripts/deploy.py --profile heavyai status
 python3 scripts/deploy.py --profile heavyai destroy
 ```
 
-`destroy` removes the EC2 instance and networking. **The root disk is deleted; the S3 archive and Secrets Manager secret are retained**, with continuing storage charges until removed separately. Preserve anything needed from the database before teardown. S3 snapshots contain the raw observations but an automated database restore/replay command is not included.
+The stack creates its own VPC, subnet, internet route, instance, private encrypted/versioned S3 bucket and secret. No inbound ports or SSH keys. Database/IQ/demo ports bind to host loopback; the model adapter binds to Docker's bridge. SSM supplies access. A public shared service additionally needs authentication and TLS.
 
-For diagnostics, use an SSM shell session. Check `/var/log/firms-base-install.log`, `/var/log/firms-runtime-install.log`, `docker logs heavyai`, and `journalctl -u firms-collect.service`. These may contain private vendor configuration; do not paste logs into a public issue without reviewing them. Collection health exits nonzero if any product has not succeeded within two hours. It is checked on demand; alert routing is not configured.
+Diagnostics: `/var/log/firms-base-install.log`, `/var/log/firms-runtime-install.log`, `/opt/heavyai-source/heavydb/build/logs`, `docker logs heavyai`, and `journalctl -u firms-model -u firms-iq-adapter -u firms-collect`. IQ can fail its own dependency installation while HeavyDB starts; evaluation catches this. Status reports collection freshness, native API availability and the completed smoke score.
 
-AWS resources, EBS/S3 storage, Secrets Manager and optional model calls incur charges. Stopping the instance does not remove storage costs. The deployment does not obtain software/model access or license rights on the user's behalf.
+Destroy removes compute/networking and **deletes the root disk**. S3/Secrets Manager are retained and continue incurring storage charges. Preserve database data before teardown. AWS compute, storage and optional API calls incur charges. Browser assets use Leaflet/unpkg and CARTO and require internet.
 
 ## Development
 
 ```bash
 python3 -m unittest discover -s tests -v
 python3 -m compileall -q app scripts infra
-bash -n infra/userdata.sh scripts/bootstrap.sh
-python3 infra/template.py
+bash -n infra/userdata.sh scripts/bootstrap.sh scripts/install_model.sh
 ```
 
-Tests run with the Python standard library and fake database failures; they do not certify a real HeavyDB release. CI runs the same checks with Python 3.10. No AWS credentials are needed for CI.
-
-Source references: [NASA FIRMS Area API](https://firms.modaps.eosdis.nasa.gov/api/area), [AWS G5 specifications](https://aws.amazon.com/ec2/instance-types/g5/), [HeavyLM deployment](https://docs.heavy.ai/heavyiq-conversational-analytics/heavyiq-model-overview-heavylm), [current HEAVY.AI installation](https://docs.nvidia.com/heavyai/installation-and-configuration/installation), [HeavyDB CSV import](https://docs.nvidia.com/heavyai/loading-and-exporting-data/command-line/load-data).
-
-Repository code is MIT licensed. HEAVY.AI binaries, model weights, satellite products, basemap services and API services retain their own licenses and terms.
+CI requires no AWS credentials. Tests do not certify a real HeavyDB build/model performance. Repository code is MIT licensed; upstream software, model weights, satellite data and services retain their own licenses and terms.

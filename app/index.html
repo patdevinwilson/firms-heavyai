@@ -11,6 +11,7 @@ label{display:flex;gap:8px;align-items:center}select,button{padding:9px 12px;bor
 button{cursor:pointer;background:#12695f}#map{height:58vh;min-height:360px;border-radius:10px;background:#182c39}
 #summary{font-size:19px;color:#78dcc6;margin:16px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:10px;border-bottom:1px solid #34404d}
 pre{white-space:pre-wrap;font-size:13px;color:#c0d4e6}details{margin:20px 0}a{color:#78dcc6}.leaflet-popup-content{color:#172635}
+.instrument{position:relative;width:300px;height:300px;background:#ddd}.instrument img{width:100%;height:100%}.cross{position:absolute;color:#ff3030;font-size:24px;transform:translate(-50%,-50%);text-shadow:0 0 2px white}#records{max-height:480px;overflow:auto;margin:20px 0}.record{padding:12px;border-bottom:1px solid #34404d}
 </style>
 <header><h1>Global thermal activity</h1><p>NASA FIRMS · VIIRS observations · ongoing collection</p></header>
 <main><div class="controls">
@@ -19,6 +20,7 @@ pre{white-space:pre-wrap;font-size:13px;color:#c0d4e6}details{margin:20px 0}a{co
 <label>Satellite <select id="satellite"><option value="all">All</option><option value="N20">NOAA-20</option><option value="N21">NOAA-21</option><option value="N">Suomi-NPP</option></select></label>
 <button id="refresh">Refresh</button></div>
 <div id="map"></div><div id="summary" role="status">Loading observations…</div>
+<div id="records" aria-live="polite">Select a cell to inspect its individual detections and instrument imagery.</div>
 <p>Each circle summarizes detections within a 1° cell. Cells have different physical areas at different latitudes. Counts describe satellite detections, not distinct fires or confirmed incidents. Missing detections do not establish inactivity.</p>
 <table><thead><tr><th>Product</th><th>Last successful collection (UTC)</th><th>Latest observation (UTC)</th></tr></thead><tbody id="freshness"></tbody></table>
 <details><summary>Query and evidence</summary><pre id="sql"></pre><p><a href="https://firms.modaps.eosdis.nasa.gov/" target="_blank" rel="noopener">NASA FIRMS</a> · Open HeavyIQ in the separate Immerse connection for natural-language analysis.</p></details>
@@ -28,6 +30,32 @@ pre{white-space:pre-wrap;font-size:13px;color:#c0d4e6}details{margin:20px 0}a{co
 const map=L.map('map',{preferCanvas:true}).setView([15,0],2);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'© OpenStreetMap contributors © CARTO',maxZoom:18}).addTo(map);
 const layer=L.layerGroup().addTo(map);let running=false;
+function filters(){const p=new URLSearchParams();for(const key of ['hours','confidence','satellite'])p.set(key,document.getElementById(key).value);return p;}
+async function records(lon,lat,offset=0){
+ const panel=document.getElementById('records');if(offset===0)panel.replaceChildren();
+ const params=filters();params.set('lon',Math.floor(lon));params.set('lat',Math.floor(lat));params.set('offset',offset);
+ try{const response=await fetch('/api/records?'+params);const data=await response.json();if(!response.ok)throw new Error(data.error);
+  for(const r of data.records){const div=document.createElement('div');div.className='record';
+   const label=document.createElement('p');label.textContent=`${r.satellite} · ${r.acquired_at} UTC · confidence ${r.confidence} · FRP ${r.frp??'unavailable'} MW · ${r.latitude}, ${r.longitude}`;div.append(label);
+   const button=document.createElement('button');button.textContent='Open instrument image';button.onclick=()=>{
+    const popup=document.createElement('div');const caption=document.createElement('p');caption.textContent=`${r.imagery.kind} · ${r.imagery.date} · ${r.imagery.provenance}`;popup.append(caption);
+    const frame=document.createElement('div');frame.className='instrument';const image=document.createElement('img');image.alt='NASA VIIRS imagery; transparent areas indicate missing coverage';image.src=r.imagery.popup_url;
+    image.onerror=()=>{frame.replaceChildren();frame.textContent='Imagery unavailable. GIBS may not yet have published this satellite/date.';};frame.append(image);
+    const marker=document.createElement('span');marker.className='cross';marker.textContent='+';marker.style.left=100*r.imagery.marker[0]+'%';marker.style.top=100*r.imagery.marker[1]+'%';frame.append(marker);popup.append(frame);
+    const note=document.createElement('p');note.textContent='The cross marks the FIRMS coordinate. Blank pixels mean missing imagery, not absence of activity.';popup.append(note);
+    const link=document.createElement('a');link.href=r.imagery.worldview_url;link.target='_blank';link.rel='noopener';link.textContent='Open NASA Worldview';popup.append(link);
+    const granuleButton=document.createElement('button');granuleButton.textContent='Find matching instrument granule';granuleButton.onclick=async()=>{
+     granuleButton.disabled=true;try{const response=await fetch('/api/granule?id='+r.id);const data=await response.json();if(!response.ok)throw new Error(data.error);
+      const note=document.createElement('p');note.textContent=data.note;popup.append(note);
+      if(!data.granules.length){const p=document.createElement('p');p.textContent='No matching granule is currently indexed.';popup.append(p);}
+      for(const granule of data.granules){const p=document.createElement('p');p.textContent=granule.title+' · '+granule.start;popup.append(p);for(const item of granule.links){const a=document.createElement('a');a.href=item.url;a.target='_blank';a.rel='noopener';a.textContent=' '+item.kind+' ';popup.append(a);}}
+     }catch(error){const p=document.createElement('p');p.textContent=error.message;popup.append(p);granuleButton.disabled=false;}
+    };popup.append(document.createElement('br'),granuleButton);
+    L.popup({maxWidth:340}).setLatLng([r.latitude,r.longitude]).setContent(popup).openOn(map);
+   };div.append(button);panel.append(div);}
+  if(data.records.length===100){const more=document.createElement('button');more.textContent='Next 100 detections';more.onclick=()=>{more.remove();records(lon,lat,offset+100);};panel.append(more);}
+ }catch(error){const p=document.createElement('p');p.textContent=error.message;panel.append(p);}
+}
 async function refresh(){
  if(running)return;running=true;document.getElementById('refresh').disabled=true;
  try{
@@ -35,7 +63,7 @@ async function refresh(){
   const response=await fetch('/api/activity?'+params);const data=await response.json();if(!response.ok)throw new Error(data.error);
   layer.clearLayers();let total=0;
   for(const [lon,lat,count,latest] of data.cells){total+=count;const popup=document.createElement('div');popup.textContent=`${count.toLocaleString()} detections · latest ${latest} UTC`;
-   L.circleMarker([lat,lon],{radius:Math.min(18,3+Math.log2(count+1)),color:'#ffac58',weight:1,fillColor:'#ff794b',fillOpacity:0.6}).bindPopup(popup).addTo(layer);}
+   L.circleMarker([lat,lon],{radius:Math.min(18,3+Math.log2(count+1)),color:'#ffac58',weight:1,fillColor:'#ff794b',fillOpacity:0.6}).bindPopup(popup).on('click',()=>records(lon,lat)).addTo(layer);}
   document.getElementById('summary').textContent=`${total.toLocaleString()} detections in ${data.cells.length.toLocaleString()} cells`;
   const body=document.getElementById('freshness');body.replaceChildren();
   for(const row of data.freshness){const tr=document.createElement('tr');for(const value of row){const td=document.createElement('td');td.textContent=value??'No detections';tr.append(td);}body.append(tr);}

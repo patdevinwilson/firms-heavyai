@@ -47,6 +47,10 @@ def validate_config(config):
     image = config.get("heavyai_image", "")
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._/@:-]+", image) or image.endswith(":latest"):
         raise ValueError("Provide a versioned HEAVY.AI image reference (not latest)")
+    if config.get("build_from_source"):
+        for field in ("heavydb_ref", "heavyiq_ref"):
+            if not re.fullmatch(r"[0-9a-f]{40}", config.get(field, "")):
+                raise ValueError("Source builds require full commit hashes: " + field)
     archive = config.get("heavyai_image_archive", "")
     if archive and not archive.startswith(("s3://", "https://")):
         raise ValueError("Image archive must be s3:// or https://")
@@ -79,6 +83,7 @@ def configure(args):
     config = json.loads((config_path if config_path.exists() else ROOT / "config.example.json").read_text())
     if args.image:
         config["heavyai_image"] = args.image
+        config["build_from_source"] = False
     if args.archive:
         config["heavyai_image_archive"] = args.archive
         config["heavyai_image_sha256"] = args.sha256 or ""
@@ -103,7 +108,7 @@ def configure(args):
     if args.fable_model:
         config["fable_model"] = args.fable_model
     validate_config(config)
-    if config["heavyiq_required"] and not secret.get("heavyiq_config"):
+    if config["heavyiq_required"] and not config.get("build_from_source") and not secret.get("heavyiq_config"):
         raise ValueError("Supply --iq-config with your release-supported native HeavyIQ configuration; "
                          "or explicitly use --without-heavyiq for a collection-only deployment")
     if config.get("fable_model") and not secret.get("anthropic_api_key"):
@@ -119,12 +124,12 @@ def configure(args):
 def send(args, config, instance, command):
     return aws(["ssm", "send-command", "--instance-ids", instance,
                 "--document-name", "AWS-RunShellScript", "--timeout-seconds", "3600",
-                "--parameters", json.dumps({"commands": [command], "executionTimeout": ["3600"]})],
+                "--parameters", json.dumps({"commands": ["bash -lc " + shlex.quote(command)], "executionTimeout": ["28800"]})],
                args.profile, config["region"])["Command"]["CommandId"]
 
 
 def wait_command(args, config, instance, command_id):
-    for _ in range(240):
+    for _ in range(2940):
         try:
             result = aws(["ssm", "get-command-invocation", "--command-id", command_id,
                           "--instance-id", instance], args.profile, config["region"])
@@ -149,7 +154,7 @@ def deploy(args, config):
     if not secret_path.exists():
         raise ValueError("Run configure first")
     secret = json.loads(secret_path.read_text())
-    if config["heavyiq_required"] and not secret.get("heavyiq_config"):
+    if config["heavyiq_required"] and not config.get("build_from_source") and not secret.get("heavyiq_config"):
         raise ValueError("HeavyIQ configuration is required")
     identity = aws(["sts", "get-caller-identity"], args.profile, config["region"])
     print(f"Account {identity['Account']}; region {config['region']}; g5.4xlarge; {config['disk_gb']} GB gp3.")
@@ -210,7 +215,7 @@ def deploy(args, config):
     command_id = send(args, config, instance, command)
     print("SSM bootstrap command: " + command_id, flush=True)
     wait_command(args, config, instance, command_id)
-    print("Deployment ready. Run connect for the demo, or connect --port 6273 for Immerse.")
+    print("Bootstrap complete. Run status for evaluation/freshness, connect for the map, or connect --port 6273 for Immerse.")
 
 
 def main():
