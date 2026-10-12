@@ -11,10 +11,10 @@ fi
 snap start amazon-ssm-agent
 ubuntu-drivers install --gpgpu
 # Rendering needs the GL/Vulkan driver libraries as well as the headless driver.
-branch=$(dpkg-query -W -f='${Package}\n' 'nvidia-headless*' 2>/dev/null | sed -nE 's/^nvidia-headless(-no-dkms)?-([0-9]+)-server$/\2/p' | sort -u | tail -1)
+branch=$(dpkg-query -W -f='${Package}\n' | sed -nE 's/^nvidia-(driver|headless(-no-dkms)?)-([0-9]+)-server(-open)?$/\3/p' | sort -u | tail -1)
 test -n "$branch"
 apt-get install -y "nvidia-utils-${branch}-server" "libnvidia-gl-${branch}-server"
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor --yes -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
 curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list |
   sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#' > /etc/apt/sources.list.d/nvidia-container-toolkit.list
 apt-get update

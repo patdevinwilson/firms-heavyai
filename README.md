@@ -96,6 +96,8 @@ python3 scripts/deploy.py --profile heavyai destroy
 
 The stack creates its own VPC, subnet, internet route, instance, private encrypted/versioned S3 bucket and secret. No inbound ports or SSH keys. Database/IQ/demo ports bind to host loopback; the model adapter binds to Docker's bridge. SSM supplies access. A public shared service additionally needs authentication and TLS.
 
+If the account has reached its VPC quota, configure with `--vpc-id VPC_ID --subnet-id PUBLIC_SUBNET_ID` to reuse existing networking. The subnet must belong to that VPC and have an active internet-gateway route. The stack creates its own security group and never manages or deletes the supplied network. Confirm the subnet's network ACL allows outbound downloads/SSM. Regional GPU availability still applies.
+
 Diagnostics: `/var/log/firms-base-install.log`, `/var/log/firms-runtime-install.log`, `/opt/heavyai-source/heavydb/build/logs`, `docker logs heavyai`, and `journalctl -u firms-model -u firms-iq-adapter -u firms-collect`. IQ can fail its own dependency installation while HeavyDB starts; evaluation catches this. Status reports collection freshness, native API availability and the completed smoke score.
 
 Destroy removes compute/networking and **deletes the root disk**. S3/Secrets Manager are retained and continue incurring storage charges. Preserve database data before teardown. AWS compute, storage and optional API calls incur charges. Browser assets use Leaflet/unpkg and CARTO and require internet.

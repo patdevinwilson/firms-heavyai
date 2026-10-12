@@ -40,6 +40,11 @@ def validate_config(config):
         raise ValueError("retain_days must be 3..365")
     if not 100 <= config.get("disk_gb", 0) <= 2000:
         raise ValueError("disk_gb must be 100..2000")
+    if config.get("existing_vpc_id") or config.get("existing_subnet_id"):
+        for field, pattern in (("existing_vpc_id", r"vpc-[0-9a-f]{8}(?:[0-9a-f]{9})?"),
+                               ("existing_subnet_id", r"subnet-[0-9a-f]{8}(?:[0-9a-f]{9})?")):
+            if not re.fullmatch(pattern, config.get(field, "")):
+                raise ValueError("Provide both existing VPC and public subnet IDs")
     from app.collector import SOURCES
     sources = config.get("sources", [])
     if not sources or len(sources) != len(set(sources)) or not set(sources) <= set(SOURCES):
@@ -84,6 +89,9 @@ def configure(args):
     if args.image:
         config["heavyai_image"] = args.image
         config["build_from_source"] = False
+    if args.vpc_id or args.subnet_id:
+        config["existing_vpc_id"] = args.vpc_id or ""
+        config["existing_subnet_id"] = args.subnet_id or ""
     if args.archive:
         config["heavyai_image_archive"] = args.archive
         config["heavyai_image_sha256"] = args.sha256 or ""
@@ -166,16 +174,23 @@ def deploy(args, config):
     ami = max(images, key=lambda image: image["CreationDate"])["ImageId"]
     path, digest = package(config)
     template_path = ROOT / ".deploy" / "stack.json"
-    template_path.write_text(json.dumps(template(), indent=2))
+    template_path.write_text(json.dumps(template(existing_network=bool(config.get("existing_vpc_id"))), indent=2))
     aws(["cloudformation", "validate-template", "--template-body", "file://" + str(template_path)],
         args.profile, config["region"])
     if args.plan:
         print("Template validated; package prepared. No AWS resources created.")
         return
+    parameters = [f"AmiId={ami}", "InstanceType=g5.4xlarge", f"DiskGb={config['disk_gb']}"]
+    if config.get("existing_vpc_id"):
+        subnet = aws(["ec2", "describe-subnets", "--subnet-ids", config["existing_subnet_id"]],
+                     args.profile, config["region"])["Subnets"][0]
+        if subnet["VpcId"] != config["existing_vpc_id"]:
+            raise ValueError("Existing subnet does not belong to the selected VPC")
+        parameters += ["ExistingVpcId=" + config["existing_vpc_id"],
+                       "ExistingSubnetId=" + config["existing_subnet_id"]]
     aws(["cloudformation", "deploy", "--stack-name", config["stack_name"],
          "--template-file", str(template_path), "--capabilities", "CAPABILITY_IAM",
-         "--no-fail-on-empty-changeset", "--parameter-overrides", f"AmiId={ami}",
-         "InstanceType=g5.4xlarge", f"DiskGb={config['disk_gb']}"],
+         "--no-fail-on-empty-changeset", "--parameter-overrides", *parameters],
         args.profile, config["region"], json_output=False)
     out = outputs(args, config)
     aws(["secretsmanager", "put-secret-value", "--secret-id", out["SecretArn"],
@@ -224,6 +239,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     setup = commands.add_parser("configure")
     setup.add_argument("--image")
+    setup.add_argument("--vpc-id")
+    setup.add_argument("--subnet-id")
     setup.add_argument("--archive")
     setup.add_argument("--sha256")
     setup.add_argument("--license")

@@ -15,7 +15,7 @@ def attr(name, attribute):
     return {"Fn::GetAtt": [name, attribute]}
 
 
-def template():
+def template(existing_network=False):
     resources = {}
     def add(name, kind, properties, **extras):
         resources[name] = {"Type": "AWS::" + kind, "Properties": properties, **extras}
@@ -77,17 +77,28 @@ def template():
         "Tags": [{"Key": "Name", "Value": ref("AWS::StackName")},
                  {"Key": "Project", "Value": "firms-heavyai"}],
         "UserData": {"Fn::Base64": userdata}}, DependsOn=["InternetRoute", "RouteAssociation"])
-    return {"AWSTemplateFormatVersion": "2010-09-09",
-        "Description": "Global FIRMS activity demo on one HEAVY.AI GPU host, external HeavyIQ model",
+    result = {"AWSTemplateFormatVersion": "2010-09-09",
+        "Description": "Global FIRMS activity demo with source-built HEAVY.AI and local HeavyIQ model",
         "Parameters": {
             "AmiId": {"Type": "AWS::EC2::Image::Id"},
             "InstanceType": {"Type": "String", "Default": "g5.4xlarge",
                              "AllowedValues": ["g5.4xlarge"]},
-            "DiskGb": {"Type": "Number", "Default": 300, "MinValue": 100, "MaxValue": 2000}},
+            "DiskGb": {"Type": "Number", "Default": 500, "MinValue": 100, "MaxValue": 2000}},
         "Resources": resources,
         "Outputs": {"ArchiveBucket": {"Value": ref("Archive")},
                     "SecretArn": {"Value": ref("Secret")},
                     "InstanceId": {"Value": ref("Instance")}}}
+    if existing_network:
+        for name in ("VPC", "InternetGateway", "GatewayAttachment", "Subnet", "RouteTable",
+                     "InternetRoute", "RouteAssociation"):
+            del resources[name]
+        result["Parameters"].update({
+            "ExistingVpcId": {"Type": "AWS::EC2::VPC::Id"},
+            "ExistingSubnetId": {"Type": "AWS::EC2::Subnet::Id"}})
+        resources["SecurityGroup"]["Properties"]["VpcId"] = ref("ExistingVpcId")
+        resources["Instance"]["Properties"]["NetworkInterfaces"][0]["SubnetId"] = ref("ExistingSubnetId")
+        resources["Instance"].pop("DependsOn")
+    return result
 
 
 if __name__ == "__main__":

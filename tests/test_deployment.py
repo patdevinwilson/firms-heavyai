@@ -50,6 +50,23 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(result["Resources"]["SecurityGroup"]["Properties"]["SecurityGroupIngress"], [])
         self.assertEqual(result["Resources"]["Instance"]["Properties"]["MetadataOptions"]["HttpTokens"], "required")
 
+    def test_existing_network_is_never_managed_by_stack(self):
+        result = template(existing_network=True)
+        resources = result["Resources"]
+        for name in ("VPC", "Subnet", "InternetGateway", "RouteTable", "InternetRoute"):
+            self.assertNotIn(name, resources)
+        self.assertEqual(resources["SecurityGroup"]["Properties"]["VpcId"], {"Ref": "ExistingVpcId"})
+        self.assertEqual(resources["SecurityGroup"]["Properties"]["SecurityGroupIngress"], [])
+        self.assertNotIn("DependsOn", resources["Instance"])
+
+    def test_existing_network_ids_must_be_paired(self):
+        config = self.config()
+        config["existing_vpc_id"] = "vpc-21f92c44"
+        with self.assertRaises(ValueError):
+            validate_config(config)
+        config["existing_subnet_id"] = "subnet-8de1cba5"
+        validate_config(config)
+
     def test_archive_and_secret_are_retained(self):
         result = template()
         for resource in ("Archive", "Secret"):
