@@ -1,3 +1,4 @@
+
 # Global FIRMS activity with HEAVY.AI and Nemotron on AWS
 
 Deploy global NASA FIRMS collection, a map with instrument imagery popups, source-built HEAVY.AI and local Nemotron inference on one **g5.4xlarge**, using AWS profile **heavyai**. Optional Fable briefings summarize query evidence daily.
@@ -126,5 +127,6 @@ python3 -m unittest discover -s tests -v
 python3 -m compileall -q app scripts infra
 bash -n infra/userdata.sh scripts/bootstrap.sh scripts/install_model.sh
 ```
+<img width="1548" height="867" alt="Screenshot 2026-10-13 at 3 46 17 PM" src="https://github.com/user-attachments/assets/3d2c0782-fe6c-46ea-b71b-f4ceb3746f55" />
 
 CI requires no AWS credentials. Tests do not certify a real HeavyDB build/model performance. Repository code is MIT licensed; upstream software, model weights, satellite data and services retain their own licenses and terms.
