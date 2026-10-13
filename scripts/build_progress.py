@@ -10,6 +10,7 @@ from pathlib import Path
 STAGES = {"model_install": "Nemotron installation", "heavyai_dependencies": "HEAVY.AI dependencies",
           "heavyai_components": "HeavyDB / Immerse / HeavyIQ compilation",
           "engine_initialize": "HeavyDB initialization", "collection": "Initial FIRMS collection",
+          "render_verification": "GPU rendering verification",
           "iq_evaluation": "Native HeavyIQ SQL evaluation", "ready": "Runtime ready"}
 
 
@@ -40,7 +41,7 @@ def snapshot(root=Path("/"), now=None):
         elif not terminal_stage and ("boost_" in current_tail or "gcc.compile.c++" in current_tail):
             report["stage"] = "Dependencies: Boost"
         percentages = re.findall(r"^\[\s*(\d{1,3})%\] (?:Building|Built|Linking|Generating)", current_tail, re.M)
-        if percentages and not (markers and markers[-1] in {"engine_initialize", "collection", "iq_evaluation", "ready"}):
+        if percentages and not (markers and markers[-1] in {"engine_initialize", "collection", "render_verification", "iq_evaluation", "ready"}):
             report["component_percent"] = min(100, int(percentages[-1]))
         report["last_output_seconds_ago"] = max(0, math.floor(now - newest.stat().st_mtime))
     report["load_average_1m"] = round(os.getloadavg()[0], 1)

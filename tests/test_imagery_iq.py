@@ -3,11 +3,12 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from datetime import date, datetime
 from unittest.mock import patch
 from app.imagery import descriptor, fetch_image, granule_search
 from app.iq_adapter import clean, messages, Handler
 from app.server import record_query
-from scripts.evaluate_iq import read_only
+from scripts.evaluate_iq import read_only, canonical
 
 
 class ImageryTests(unittest.TestCase):
@@ -72,10 +73,17 @@ class ImageryTests(unittest.TestCase):
 
 
 class IQTests(unittest.TestCase):
+    def test_equivalent_utc_date_and_midnight_results_compare_equal(self):
+        self.assertEqual(canonical([(date(2026, 1, 2), 2)]),
+                         canonical([(datetime(2026, 1, 2), 2)]))
+        self.assertNotEqual(canonical([(date(2026, 1, 2), 2)]),
+                            canonical([(datetime(2026, 1, 2, 1), 2)]))
+
     def test_completion_bridge_returns_native_wire_shape(self):
         from unittest.mock import Mock
         for stream in (False, True):
-            request = {"prompt": "<|sql prompt|>\nCount rows\n<|sql answer|>\n", "stream": stream}
+            request = {"prompt": "<|sql prompt|>\nCount rows\n<|sql answer|>\n", "stream": stream,
+                       "n": None, "seed": None, "temperature": None, "max_tokens": None}
             body = json.dumps(request).encode()
             handler = Handler.__new__(Handler)
             handler.path = "/v1/completions"
@@ -106,6 +114,15 @@ class IQTests(unittest.TestCase):
             self.assertEqual(task, marker)
             self.assertEqual(chat[1]["content"], "Schema and question")
             self.assertIn("HeavySQL", chat[0]["content"])
+
+    def test_native_unmarked_prompt_uses_explicit_task_stop(self):
+        task, chat = messages("Schema and question", stop=["\nSQLResult:", "\n<|sql answer|>"])
+        self.assertEqual(task, "sql")
+        self.assertEqual(chat[1]["content"], "Schema and question")
+        with self.assertRaises(ValueError):
+            messages("Schema and question", stop=["\nSQLResult:"])
+        with self.assertRaises(ValueError):
+            messages("<|cot sql prompt|>\nQuestion", stop=["\n<|sql answer|>"])
 
     def test_reasoning_and_sql_fences_removed(self):
         self.assertEqual(clean("<think>private</think>\n```sql\nSELECT 1\n```", "sql"), "SELECT 1")

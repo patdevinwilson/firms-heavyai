@@ -10,4 +10,5 @@ config.json
 secrets*.json
 heavyiq.local.conf
 .iq-evaluation.json
+.render-check.png
 .DS_Store

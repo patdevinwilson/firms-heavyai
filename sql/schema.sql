@@ -21,11 +21,12 @@ CREATE TABLE IF NOT EXISTS firms_observation_batches (
 CREATE TABLE IF NOT EXISTS firms_published_windows (
   source TEXT ENCODING DICT(8),
   window_day DATE,
-  batch_id TEXT ENCODING DICT(32)
+  batch_id TEXT ENCODING DICT(32),
+  publication_order BIGINT
 );
 CREATE VIEW firms_observations AS
 WITH latest AS (
-  SELECT source, window_day, MAX(batch_id) AS batch_id
+  SELECT source, window_day, MAX(publication_order) AS publication_order
   FROM firms_published_windows GROUP BY source, window_day
 )
 SELECT o.observation_id, o.source, o.acquired_at, o.latitude, o.longitude,
@@ -33,8 +34,10 @@ SELECT o.observation_id, o.source, o.acquired_at, o.latitude, o.longitude,
        o.scan, o.track, o.daynight, o.product_version, o.ingested_at,
        o.raw_object_key
 FROM firms_observation_batches o
-JOIN latest w ON o.source=w.source AND CAST(o.acquired_at AS DATE)=w.window_day
-             AND o.batch_id=w.batch_id;
+JOIN firms_published_windows w ON o.source=w.source
+             AND CAST(o.acquired_at AS DATE)=w.window_day AND o.batch_id=w.batch_id
+JOIN latest p ON w.source=p.source AND w.window_day=p.window_day
+             AND w.publication_order=p.publication_order;
 CREATE TABLE IF NOT EXISTS firms_collection_runs (
   run_id TEXT ENCODING DICT(32),
   source TEXT ENCODING DICT(8),

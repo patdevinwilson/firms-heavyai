@@ -2,7 +2,7 @@
 
 Deploy global NASA FIRMS collection, a map with instrument imagery popups, source-built HEAVY.AI and local Nemotron inference on one **g5.4xlarge**, using AWS profile **heavyai**. Optional Fable briefings summarize query evidence daily.
 
-**Validation status:** local tests pass. Source/model revisions are pinned; NASA layer names and the model checksum were verified against public metadata. Full AWS source-build execution, live FIRMS ingestion and model HeavySQL accuracy have not yet been verified. Bootstrap runs a native HeavyIQ execution benchmark before reporting success.
+**Validation status (2026-10-13):** the AWS source build is complete. All three FIRMS products are collecting successfully; the live view held 301,831 observations at verification. Native HeavyIQ passed all six fixture execution tests and generated a live total-count query matching the database. GPU point and polygon rendering report enabled; a real 20,000-point FIRMS render returned a 640×360 PNG (264 ms GPU render, 2.6 s total for that request). These are smoke checks, not broad model-accuracy or performance claims.
 
 ## Quick start
 
@@ -27,6 +27,10 @@ python3 scripts/deploy.py --profile heavyai connect --port 6273
 
 Open http://localhost:6273 for Immerse/native HeavyIQ. Log in as `firms_reader` with `reader_password` from `.deploy/secrets.json`. Administrative login uses `admin` and `heavyai_password`. The default admin password is rotated automatically. Native IQ uses the user's HeavyDB session permissions.
 
+For Immerse basemaps and address search, set `MAPBOX_TOKEN` and `GOOGLE_API_KEY` before running `configure`. Credentials are stored in the deployment secret and written to the protected `[web]` configuration. The pinned webserver injects `window.MAP_CONFIG` into the index page; this revision does not require a frontend rebuild. Use a Mapbox public token. These browser map credentials are visible to clients allowed by the network access rules and should have provider URL restrictions appropriate to the deployment.
+
+The current deployment also permits direct Immerse access on port 6273 from the user's approved public IPs, through a systemd TCP forwarder on the instance's private interface. This is an operational addition to the existing stack; fresh deployments retain SSM-only access. Direct access requires an explicit security-group rule and `immerse_host` set to the browser-reachable hostname/IP in `config.json`. The default `localhost` setting is suitable for an SSM tunnel. If the client's public IP changes, update the access rule.
+
 ## Source build
 
 The deployment follows [NVIDIA's source-build workflow](https://docs.nvidia.com/heavyai/installation-and-configuration/installation/build-from-source), Ubuntu 22.04 and CUDA 12.9.2. It builds the dependencies container, then runs **`dev-tools/dev.sh build all --docker`**. The `all` target includes HeavyIQ; upstream's default build omits it.
@@ -36,6 +40,8 @@ HeavyDB/HeavyIQ commits are in `config.example.json`; Immerse/webserver commits 
 The pinned HeavyIQ revision references an unavailable Chroma development package. The build explicitly replaces `chromadb==1.5.10.dev239` with published `1.5.9`, removes the TestPyPI extra index, and builds the declared `pyheavydb==10.0.0` connector from a pinned public source revision using upstream's local-wheel hook. These changes are recorded in the manifest. Native IQ generation is evaluated after startup; RAG remains disabled, and Chroma/RAG behavior is not certified by this demo.
 
 At the inspected revision, `build deps` builds dependencies from scratch rather than merely pulling an image. Allow **several hours** for the first deployment. Remote bootstrap allows eight hours and logs to `/var/log/firms-runtime-install.log`. Subsequent runs reuse matching artifacts. Eight build jobs limit memory pressure. Default encrypted gp3 storage is **500 GB** for build containers, sources and data.
+
+Base setup installs Ubuntu's `docker-buildx` package: upstream builds Sphinx documentation after the product image and requires BuildKit for that final step.
 
 Native IQ configuration is generated from the pinned schema; users need no external model endpoint or manual IQ stanza. `--without-heavyiq` gives a collection-only deployment. Optional `--license` supports releases requiring one. Software/model license terms remain their owners' terms.
 
@@ -49,6 +55,10 @@ This is an instruction model adapted for HeavySQL, not a model demonstrated to h
 
 Supported tasks: SQL generation/repair, result explanation, table selection, suggested questions and instructions, up to five candidates. Streaming is buffered, then emitted as SSE. Beam search, token-logprob scoring, chain-of-thought and SQL-judge endpoints are unsupported. Generated native configuration disables beam search, logprobs and RAG. Domain guidance is added automatically; no manual Guidance-panel import is required. Retrieval of a larger HeavySQL documentation corpus is not implemented.
 
+Native HeavyIQ's tokenizer selection does not recognize Nemotron. A runtime overlay uses the tokenizer embedded in the running GGUF through the adapter's tokenize/detokenize endpoints, preserving the model ID and exact token IDs. It also restores three catalog helpers removed from pyheavydb 10 and uses the configured context budget when the LCEL placeholder lacks one. The adapter accepts native task markers in either the prompt or explicit task stop sequences and handles nullable completion parameters. Generated SQL still executes using the supplied user's database session.
+
+GPU rendering uses a headless EGL Vulkan manifest, the NVIDIA graphics/display capabilities, explicit DRM/modeset device access, unlimited locked memory, and the source-built GEOS libraries in the data volume. Bootstrap runs `scripts/verify_render.py` to check renderer status and render actual FIRMS points through `render_vega`; it saves `.render-check.png` on the deployment host and fails setup if rendering fails.
+
 Bootstrap runs `scripts/evaluate_iq.py` against native `/api/v1/lcel/query`. A nonempty temporary fixture checks categorical confidence, satellite grouping, UTC daily grouping, FRP and timestamp boundaries. Generated SQL executes as `firms_reader` and is compared with gold execution results. Admin creates/removes the fixture. `.iq-evaluation.json` on the instance records results. A failure stops bootstrap with an error; already started map/collection services remain available for diagnosis.
 
 Rerun from an SSM shell after prompt/model changes:
@@ -61,7 +71,7 @@ cd /opt/firms-heavyai
 .venv/bin/python scripts/evaluate_iq.py
 ```
 
-Passing six smoke cases does not establish broad HeavySQL accuracy. Extend evaluation with real investigations, geometry/geography units, joins, missing data, hallucinations and query limits. Fine-tune only after measuring failures; preserve held-out cases.
+Passing six smoke cases does not establish broad HeavySQL accuracy. Equivalent UTC dates and midnight timestamps compare equally in the daily-grouping case. Extend evaluation with real investigations, geometry/geography units, joins, missing data, hallucinations and query limits. Fine-tune only after measuring failures; preserve held-out cases.
 
 ## Imagery for each record
 
@@ -84,6 +94,8 @@ Each popup also offers **Find matching instrument granule**. NASA CMR is queried
 Hourly collection fetches `world` from VIIRS_NOAA20_NRT, VIIRS_NOAA21_NRT and VIIRS_SNPP_NRT, using a fixed UTC start date and rolling three-calendar-day window. Acquisition/ingestion times are separate. Stable IDs include satellite, product, time and coordinates; revisions retain the ID. Invalid responses do not count as empty successful collections.
 
 Raw CSV is archived in S3. New batches are loaded and counted before one statement publishes the affected source/days. Failed loads leave previous data visible. `firms_observations` exposes published data; `firms_collection_runs` reports freshness. A lock prevents overlapping collectors. Local retention is 90 days; raw S3 retention is 365 days. Initial history is three days; baselines accumulate. Historical backfill/archive replay are not automated.
+
+Publication uses a numeric sequence under the collector lock because HeavySQL does not support `MAX()` on text batch IDs. Bootstrap migrates existing publication markers and recreates the view without deleting observations.
 
 Detections are thermal pixels, not distinct fires, causes, intent or verified incidents. Missing detections do not prove inactivity. Global product coverage depends on orbits, cloud and processing delays. Infrastructure proximity needs another dataset; coverage-normalized anomaly detection is not implemented.
 

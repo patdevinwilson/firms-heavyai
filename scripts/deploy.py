@@ -108,6 +108,9 @@ def configure(args):
     secret["firms_map_key"] = map_key
     secret.setdefault("heavyai_password", secrets.token_urlsafe(32))
     secret.setdefault("reader_password", secrets.token_urlsafe(32))
+    for variable, field in (("MAPBOX_TOKEN", "mapbox_token"), ("GOOGLE_API_KEY", "google_maps_api_key")):
+        if os.environ.get(variable):
+            secret[field] = os.environ[variable]
     if args.license:
         secret["heavyai_license"] = Path(args.license).read_text()
     if args.iq_config:

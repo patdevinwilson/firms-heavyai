@@ -22,12 +22,20 @@ TASKS = {
 }
 
 
-def messages(prompt):
+def messages(prompt, stop=None):
     match = re.match(r"<\|(?:(.*?) )?prompt\|>\n", prompt)
-    if not match or (match.group(1) or "") not in TASKS:
-        raise ValueError("Unsupported HeavyIQ task marker")
-    task = match.group(1) or ""
-    body = prompt[match.end():]
+    if match and (match.group(1) or "") in TASKS:
+        task = match.group(1) or ""
+        body = prompt[match.end():]
+    else:
+        stops = [stop] if isinstance(stop, str) else (stop or [])
+        hints = {hint.group(1) or "" for value in stops
+                 if isinstance(value, str) and (hint := re.fullmatch(r"\n<\|(?:(.*?) )?answer\|>", value))
+                 and (hint.group(1) or "") in TASKS}
+        if len(hints) != 1 or re.match(r"<\|", prompt):
+            raise ValueError("Unsupported HeavyIQ task marker")
+        task = hints.pop()
+        body = prompt
     body = re.sub(r"\n<\|(?:.*? )?answer\|>\n?$", "", body)
     system = ("You are a HEAVY.AI HeavySQL assistant. " + TASKS[task] + "\n"
               "Use DATEADD('hour', -24, CURRENT_TIMESTAMP) for recent windows; "
@@ -35,6 +43,8 @@ def messages(prompt):
               "PostGIS constructors, or invented columns. Respect the provided schema.\n"
               "Answer the exact question. Never add a grouping or satellite breakdown unless requested. "
               "A request for a count without a breakdown needs one total count column and no GROUP BY.\n"
+              "When no time range is requested, include all available dates: do not add a recent-time filter. "
+              "For UTC day grouping, use DATE_TRUNC('day', acquired_at).\n"
               "Examples below illustrate syntax only; never use an example table absent from the task schema.\n"
               + (ROOT / "sql/heavyiq-guidance.txt").read_text()
               + "\nExamples:\n" + (ROOT / "sql/heavysql-examples.txt").read_text())
@@ -64,6 +74,21 @@ class Handler(BaseHTTPRequestHandler):
         self.json_reply({"error": "Not found"}, 404)
 
     def do_POST(self):
+        if self.path in {"/v1/tokenize", "/v1/detokenize"}:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 131072:
+                    raise ValueError("Invalid request size")
+                payload = json.loads(self.rfile.read(length))
+                endpoint = self.path.removeprefix("/v1")
+                upstream = Request("http://127.0.0.1:8101" + endpoint,
+                    data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+                with urlopen(upstream, timeout=30) as response:
+                    return self.json_reply(json.load(response))
+            except (ValueError, TypeError):
+                return self.json_reply({"error": "Invalid tokenizer request"}, 400)
+            except Exception:
+                return self.json_reply({"error": "Local tokenizer unavailable"}, 503)
         if self.path != "/v1/completions":
             return self.json_reply({"error": "Not found"}, 404)
         try:
@@ -78,17 +103,17 @@ class Handler(BaseHTTPRequestHandler):
                 if len(prompt) != 1:
                     raise ValueError("Only one prompt per request")
                 prompt = prompt[0]
-            task, chat = messages(prompt)
-            n = int(request.get("n", 1))
+            task, chat = messages(prompt, stop=request.get("stop"))
+            n = int(request.get("n") or 1)
             if not 1 <= n <= 5:
                 raise ValueError("Unsupported candidate count")
             choices = []
             usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
             for index in range(n):
                 payload = {"model": "firms-nemotron", "messages": chat, "stream": False,
-                           "max_tokens": min(1536, int(request.get("max_tokens", 768))),
-                           "temperature": float(request.get("temperature", 0)),
-                           "seed": int(request.get("seed", 42)) + index,
+                           "max_tokens": min(1536, int(request.get("max_tokens") or 768)),
+                           "temperature": float(request.get("temperature") or 0),
+                           "seed": int(request.get("seed") if request.get("seed") is not None else 42) + index,
                            "chat_template_kwargs": {"enable_thinking": False}}
                 if request.get("stop"):
                     payload["stop"] = request["stop"]
@@ -112,7 +137,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(("data: " + json.dumps(output) + "\n\ndata: [DONE]\n\n").encode())
             else:
                 self.json_reply(output)
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError) as exc:
+            prompt_value = locals().get("prompt")
+            print(json.dumps({"event": "invalid_completion_request",
+                "error_type": type(exc).__name__,
+                "reason": str(exc) if str(exc) in {"Unsupported HeavyIQ task marker",
+                    "Only one prompt per request", "Unsupported candidate count",
+                    "Scoring/beam search unsupported", "Invalid request size"} else "Invalid field value",
+                "prompt_type": type(prompt_value).__name__,
+                "task_marker": re.match(r"\s*(<\|[a-z ]+\|>)", prompt_value).group(1)
+                    if isinstance(prompt_value, str) and re.match(r"\s*(<\|[a-z ]+\|>)", prompt_value) else None,
+                "prompt_element_type": type(prompt_value[0]).__name__
+                    if isinstance(prompt_value, list) and prompt_value else None}), flush=True)
             self.json_reply({"error": "Invalid or unsupported completion request"}, 400)
         except Exception:
             self.json_reply({"error": "Local model unavailable"}, 503)

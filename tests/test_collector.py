@@ -100,12 +100,19 @@ class CollectorTests(unittest.TestCase):
         self.assertFalse(any(s.startswith("COPY") for s in db.sql))
         self.assertTrue(any(s.startswith("INSERT INTO firms_published_windows") for s in db.sql))
 
+    def test_publication_order_increments_previous_maximum(self):
+        db = FakeDB(publication_order=7)
+        self.publish(db, [])
+        statement = next(s for s in db.sql if s.startswith("INSERT INTO firms_published_windows"))
+        self.assertTrue(statement.endswith(",8)"))
+
 
 class FakeDB:
-    def __init__(self, fail_copy=False, loaded=1):
+    def __init__(self, fail_copy=False, loaded=1, publication_order=0):
         self.sql = []
         self.fail_copy = fail_copy
         self.loaded = loaded
+        self.publication_order = publication_order
 
     def execute(self, sql):
         self.sql.append(sql)
@@ -114,6 +121,8 @@ class FakeDB:
         return self
 
     def fetchone(self):
+        if self.sql[-1].startswith("SELECT COALESCE(MAX(publication_order)"):
+            return (self.publication_order + 1,)
         return (self.loaded,)
 
 

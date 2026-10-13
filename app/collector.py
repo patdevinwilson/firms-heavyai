@@ -106,7 +106,7 @@ def replace_window(db, source, start, end, rows):
     """Load an invisible batch, then publish all days in one INSERT statement.
 
     No multi-statement transaction required. Failed loads leave the prior published
-    batch visible. The single-writer lock makes batch IDs monotonic on this host.
+    batch visible. The single-writer lock serializes numeric publication order.
     """
     batch = utcnow().strftime("%Y%m%d%H%M%S%f") + uuid.uuid4().hex
     path = Path("/var/lib/heavyai/import") / (batch + ".csv")
@@ -122,9 +122,12 @@ def replace_window(db, source, start, end, rows):
             if loaded != len(rows):
                 raise RuntimeError("Incomplete COPY; prior batch remains published")
         published = []
+        publication_order = db.execute(
+            "SELECT COALESCE(MAX(publication_order), 0) + 1 FROM firms_published_windows"
+        ).fetchone()[0]
         day = start
         while day < end:
-            published.append((source, day.date().isoformat(), batch))
+            published.append((source, day.date().isoformat(), batch, publication_order))
             day += timedelta(days=1)
         insert_rows(db, "firms_published_windows", published)
         # Once publication succeeds, older and abandoned batches in this window

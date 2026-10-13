@@ -75,6 +75,10 @@ systemctl enable --now firms-collect.timer firms-demo.service
 if .venv/bin/python -c 'import json; c=json.load(open("config.json")); raise SystemExit(0 if c.get("fable_model") else 1)'; then
   systemctl enable --now firms-brief.timer
 fi
+if .venv/bin/python -c 'import json; c=json.load(open("config.json")); raise SystemExit(0 if c.get("build_from_source") else 1)'; then
+  echo '[firms-progress] render_verification'
+  .venv/bin/python scripts/verify_render.py
+fi
 if .venv/bin/python -c 'import json; c=json.load(open("config.json")); raise SystemExit(0 if c.get("build_from_source") and c.get("heavyiq_required") else 1)'; then
   # Native IQ may install its own Python environment after HeavyDB is available.
   for attempt in {1..120}; do

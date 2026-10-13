@@ -7,8 +7,10 @@ import json
 import re
 import sys
 import uuid
+from datetime import date, datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -25,7 +27,11 @@ def read_only(sql):
 
 
 def canonical(rows):
-    return sorted([tuple(str(v) for v in row) for row in rows], key=str)
+    def value(item):
+        if isinstance(item, date) and not isinstance(item, datetime):
+            item = datetime.combine(item, datetime.min.time())
+        return str(item)
+    return sorted([tuple(value(v) for v in row) for row in rows], key=str)
 
 
 def main():
@@ -72,6 +78,13 @@ def main():
                 report["passed"] = canonical(reader.execute(sql).fetchall()) == canonical(admin.execute(gold).fetchall())
             except Exception as exc:
                 report["error_type"] = type(exc).__name__
+                if isinstance(exc, HTTPError):
+                    report["http_status"] = exc.code
+                    detail = exc.read(2000).decode(errors="replace")
+                    for value in [reader.connection._session, *secret.values()]:
+                        if isinstance(value, str) and value:
+                            detail = detail.replace(value, "[REDACTED]")
+                    report["error_detail"] = detail
             reports.append(report)
     finally:
         if reader:

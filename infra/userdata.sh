@@ -3,7 +3,7 @@ set -euo pipefail
 exec >> /var/log/firms-base-install.log 2>&1
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y docker.io python3-venv python3-pip awscli unzip curl gnupg ubuntu-drivers-common git cmake build-essential libcurl4-openssl-dev
+apt-get install -y docker.io docker-buildx python3-venv python3-pip awscli unzip curl gnupg ubuntu-drivers-common git cmake build-essential libcurl4-openssl-dev
 systemctl enable --now docker
 if ! snap list amazon-ssm-agent >/dev/null 2>&1; then
   snap install amazon-ssm-agent --classic
