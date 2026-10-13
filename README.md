@@ -9,7 +9,7 @@ Deploy global NASA FIRMS collection, a map with instrument imagery popups, sourc
 Users need Python 3.10+, AWS CLI v2, the AWS Session Manager plugin, an AWS profile with CloudFormation/EC2/IAM/S3/Secrets Manager/SSM deployment permissions, GPU quota/capacity, and a free [FIRMS MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/). No local GPU or Docker installation is required.
 
 ```bash
-git clone YOUR_PUBLISHED_REPOSITORY_URL
+git clone https://github.com/patdevinwilson/firms-heavyai.git
 cd firms-heavyai
 python3 scripts/deploy.py --profile heavyai configure
 python3 scripts/deploy.py --profile heavyai deploy --plan
@@ -17,7 +17,7 @@ python3 scripts/deploy.py --profile heavyai deploy
 python3 scripts/deploy.py --profile heavyai connect
 ```
 
-The repo has not yet been published to a GitHub remote; replace the clone placeholder after publishing. Configure prompts for the FIRMS key without echoing it, generates database passwords, and stores credentials in ignored `.deploy/secrets.json` with mode 0600. `FIRMS_MAP_KEY` can also be supplied through the environment.
+Configure prompts for the FIRMS key without echoing it, generates database passwords, and stores credentials in ignored `.deploy/secrets.json` with mode 0600. `FIRMS_MAP_KEY` can also be supplied through the environment. Deployment credentials, the local `config.json`, and `.deploy/` artifacts are excluded from the GitHub repository.
 
 Open http://localhost:8080 during the SSM session. Filter global detections by time, satellite and confidence. Select a cell, page through its records and open their imagery popups. Display cells are 1° aggregations, not activity clusters; their physical areas vary with latitude.
 
