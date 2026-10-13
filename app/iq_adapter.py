@@ -38,6 +38,7 @@ def messages(prompt, stop=None):
         body = prompt
     body = re.sub(r"\n<\|(?:.*? )?answer\|>\n?$", "", body)
     system = ("You are a HEAVY.AI HeavySQL assistant. " + TASKS[task] + "\n"
+              "Apply the database guidance supplied in the task when generating SQL or explaining results.\n"
               "Use DATEADD('hour', -24, CURRENT_TIMESTAMP) for recent windows; "
               "DATE_TRUNC('day', acquired_at) for UTC days. No PostgreSQL INTERVAL, "
               "PostGIS constructors, or invented columns. Respect the provided schema.\n"
@@ -46,7 +47,6 @@ def messages(prompt, stop=None):
               "When no time range is requested, include all available dates: do not add a recent-time filter. "
               "For UTC day grouping, use DATE_TRUNC('day', acquired_at).\n"
               "Examples below illustrate syntax only; never use an example table absent from the task schema.\n"
-              + (ROOT / "sql/heavyiq-guidance.txt").read_text()
               + "\nExamples:\n" + (ROOT / "sql/heavysql-examples.txt").read_text())
     return task, [{"role": "system", "content": system}, {"role": "user", "content": body}]
 

@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from app.collector import HeavyDB, literal, settings
+from scripts.iq_guidance import GuidanceStore
 
 
 def docker(*args):
@@ -39,9 +40,61 @@ def native_iq_mounts(storage):
     (overrides / "utils.py").write_text(text)
     shutil.copyfile(ROOT / "scripts/iq_tokenizer.py", overrides / "firms_tokenizer.py")
     shutil.copyfile(ROOT / "scripts/iq_connector.py", overrides / "firms_connector.py")
-    return ["-v", f"{overrides / 'utils.py'}:/opt/heavyai/heavyiq/heavyiq/langchain/utils.py:ro",
+    mounts = ["-v", f"{overrides / 'utils.py'}:/opt/heavyai/heavyiq/heavyiq/langchain/utils.py:ro",
             "-v", f"{overrides / 'firms_tokenizer.py'}:/opt/heavyai/heavyiq/firms_tokenizer.py:ro",
             "-v", f"{overrides / 'firms_connector.py'}:/opt/heavyai/heavyiq/firms_connector.py:ro"]
+    GuidanceStore(storage / 'iq-guidance.sqlite3').initialize('heavyai',
+        [line.strip() for line in (ROOT / 'sql/heavyiq-guidance.txt').read_text().splitlines() if line.strip()])
+    shutil.copyfile(ROOT / 'scripts/iq_guidance.py', overrides / 'firms_guidance.py')
+    mounts += ['-v', f"{overrides / 'firms_guidance.py'}:/opt/heavyai/heavyiq/firms_guidance.py:ro"]
+    source_root = source.parents[1]
+
+    def overlay(relative, anchor, replacement, count=1, prefix=''):
+        original = (source_root / relative).read_text()
+        if original.count(anchor) != count:
+            raise ValueError('HeavyIQ Guidance integration changed; review ' + relative)
+        target = overrides / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(prefix + original.replace(anchor, replacement))
+        mounts.extend(['-v', f'{target}:/opt/heavyai/heavyiq/heavyiq/{relative}:ro'])
+
+    overlay('api/__init__.py', '        include_rag_routers(app)\n',
+        '        include_rag_routers(app)\n'
+        '    else:\n'
+        '        from firms_guidance import register\n'
+        '        register(app)\n')
+    for chain in ('sql_chain', 'table_chain', 'auto_sql_chain'):
+        overlay(f'lcel/chains/heavydb/{chain}.py',
+            '(lambda x: not (CONFIG.enable_rag), lambda x: relevant_info_default_values)',
+            '(lambda x: not (CONFIG.enable_rag), RunnableLambda(firms_relevant_info))',
+            prefix='from firms_guidance import relevant_info as firms_relevant_info\n')
+    # Upstream's default OpenAI templates omit relevant_info entirely.
+    overlay('lcel/prompts/openai.py', '{table_info}\n', '{table_info}\n{relevant_info}\n', count=3)
+    # SQL repair must unpack the guidance dictionary, just like initial SQL.
+    sql_path = overrides / 'lcel/chains/heavydb/sql_chain.py'
+    sql_text = sql_path.read_text()
+    anchor = 'RunnablePassthrough.assign(relevant_info=relevant_info_lambda)'
+    if sql_text.count(anchor) != 1:
+        raise ValueError('HeavyIQ SQL repair Guidance integration changed')
+    sql_path.write_text(sql_text.replace(anchor,
+        'RunnablePassthrough.assign(relevant_info_sql_dict=relevant_info_lambda)'
+        ' | RunnablePassthrough.assign('
+        'snippet_ids=lambda x: x["relevant_info_sql_dict"]["snippet_ids"], '
+        'relevant_info=lambda x: x["relevant_info_sql_dict"]["relevant_info"])'))
+    overlay('lcel/chains/heavydb/answer_chain.py',
+        '    return summarize\n',
+        '    return summarize + "\\n" + inputs["guidance_dict"]["relevant_info"]\n',
+        prefix='from firms_guidance import relevant_info as firms_relevant_info\n')
+    answer_path = overrides / 'lcel/chains/heavydb/answer_chain.py'
+    answer_text = answer_path.read_text()
+    anchor = '    derive_column_metadata_step | sql_to_answer_prompt_rbl'
+    if answer_text.count(anchor) != 1:
+        raise ValueError('HeavyIQ answer Guidance integration changed')
+    answer_path.write_text(answer_text.replace(anchor,
+        '    RunnablePassthrough.assign(guidance_dict=RunnableLambda(firms_relevant_info))\n'
+        '    | RunnablePassthrough.assign(snippet_ids=lambda x: x["guidance_dict"]["snippet_ids"])\n'
+        '    | derive_column_metadata_step | sql_to_answer_prompt_rbl'))
+    return mounts
 
 
 def main():
