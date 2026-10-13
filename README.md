@@ -129,4 +129,7 @@ bash -n infra/userdata.sh scripts/bootstrap.sh scripts/install_model.sh
 ```
 <img width="1548" height="867" alt="Screenshot 2026-10-13 at 3 46 17 PM" src="https://github.com/user-attachments/assets/3d2c0782-fe6c-46ea-b71b-f4ceb3746f55" />
 
+<img width="3825" height="1466" alt="Screenshot 2026-10-13 at 3 28 38 PM" src="https://github.com/user-attachments/assets/eee294ad-308d-4b44-99e8-0f0696516232" />
+
+
 CI requires no AWS credentials. Tests do not certify a real HeavyDB build/model performance. Repository code is MIT licensed; upstream software, model weights, satellite data and services retain their own licenses and terms.
